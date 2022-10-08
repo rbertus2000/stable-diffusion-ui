@@ -10,8 +10,10 @@ const USE_FACE_CORRECTION_KEY = "useFaceCorrection"
 const USE_UPSCALING_KEY = "useUpscaling"
 const SHOW_ONLY_FILTERED_IMAGE_KEY = "showOnlyFilteredImage"
 const STREAM_IMAGE_PROGRESS_KEY = "streamImageProgress"
+const OUTPUT_FORMAT_KEY = "outputFormat"
 const HEALTH_PING_INTERVAL = 5 // seconds
 const MAX_INIT_IMAGE_DIMENSION = 768
+const INPAINTING_EDITOR_SIZE = 450
 
 const IMAGE_REGEX = new RegExp('data:image/[A-Za-z]+;base64')
 
@@ -204,6 +206,10 @@ function isStreamImageProgressEnabled() {
     return getLocalStorageBoolItem(STREAM_IMAGE_PROGRESS_KEY, false)
 }
 
+function getOutputFormat() {
+    return getLocalStorageItem(OUTPUT_FORMAT_KEY, 'jpeg')
+}
+
 function setStatus(statusType, msg, msgType) {
     if (statusType !== 'server') {
         return
@@ -261,6 +267,32 @@ async function healthCheck() {
     } catch (e) {
         setStatus('server', 'offline', 'error')
     }
+}
+function resizeInpaintingEditor() {
+    let widthValue = parseInt(widthField.value)
+    let heightValue = parseInt(heightField.value)
+    if (widthValue === heightValue) {
+        widthValue = INPAINTING_EDITOR_SIZE
+        heightValue = INPAINTING_EDITOR_SIZE
+    } else if (widthValue > heightValue) {
+        heightValue = (heightValue / widthValue) * INPAINTING_EDITOR_SIZE
+        widthValue = INPAINTING_EDITOR_SIZE
+    } else {
+        widthValue = (widthValue / heightValue) * INPAINTING_EDITOR_SIZE
+        heightValue = INPAINTING_EDITOR_SIZE
+    }
+
+    inpaintingEditorContainer.style.width = widthValue + 'px'
+    inpaintingEditorContainer.style.height = heightValue + 'px'
+    inpaintingEditor.opts.enlargeYourContainer = true
+
+    inpaintingEditor.opts.size = inpaintingEditor.ctx.lineWidth
+    inpaintingEditor.resize()
+
+    inpaintingEditor.ctx.lineCap = "round"
+    inpaintingEditor.ctx.lineJoin = "round"
+    inpaintingEditor.ctx.lineWidth = inpaintingEditor.opts.size
+    inpaintingEditor.setColor(inpaintingEditor.opts.color)
 }
 
 function showImages(req, res, outputContainer, livePreview) {
@@ -596,16 +628,8 @@ function makeImage() {
         return
     }
 
-    let prompts = promptField.value
-    prompts = prompts.split('\n')
-    prompts.forEach(prompt => {
-        prompt = prompt.trim()
-        if (prompt === '') {
-            return
-        }
-
-        createTask(prompt)
-    })
+    let prompts = getPrompts()
+    prompts.forEach(createTask)
 
     initialText.style.display = 'none'
 }
@@ -747,6 +771,78 @@ function createTask(prompt) {
     taskQueue.unshift(task)
 }
 
+function getPrompts() {
+    let prompts = promptField.value
+    prompts = prompts.split('\n')
+
+    let promptsToMake = []
+
+    prompts.forEach(prompt => {
+        prompt = prompt.trim()
+        if (prompt === '') {
+            return
+        }
+
+        let promptMatrix = prompt.split('|')
+        prompt = promptMatrix.shift().trim()
+
+        promptsToMake.push(prompt)
+
+        promptMatrix = promptMatrix.map(p => p.trim())
+        promptMatrix = promptMatrix.filter(p => p !== '')
+
+        if (promptMatrix.length > 0) {
+            let promptPermutations = permutePrompts(prompt, promptMatrix)
+            promptsToMake = promptsToMake.concat(promptPermutations)
+        }
+    })
+
+    return promptsToMake
+}
+
+function permutePrompts(promptBase, promptMatrix) {
+    let prompts = []
+    let permutations = permute(promptMatrix)
+    permutations.forEach(perm => {
+        let prompt = promptBase
+
+        if (perm.length > 0) {
+            let promptAddition = perm.join(', ')
+            if (promptAddition.trim() === '') {
+                return
+            }
+
+            prompt += ', ' + promptAddition
+        }
+
+        prompts.push(prompt)
+    })
+
+    return prompts
+}
+
+function permute(arr) {
+    let permutations = []
+    let n = arr.length
+    let n_permutations = Math.pow(2, n)
+    for (let i = 0; i < n_permutations; i++) {
+        let perm = []
+        let mask = Number(i).toString(2).padStart(n, '0')
+
+        for (let idx = 0; idx < mask.length; idx++) {
+            if (mask[idx] === '1' && arr[idx].trim() !== '') {
+                perm.push(arr[idx])
+            }
+        }
+
+        if (perm.length > 0) {
+            permutations.push(perm)
+        }
+    }
+
+    return permutations
+}
+
 // create a file name with embedded prompt and metadata
 // for easier cateloging and comparison
 function createFileName(seed, outputFormat) {
@@ -842,7 +938,12 @@ turboField.checked = isUseTurboModeEnabled()
 streamImageProgressField.addEventListener('click', handleBoolSettingChange(STREAM_IMAGE_PROGRESS_KEY))
 streamImageProgressField.checked = isStreamImageProgressEnabled()
 
+outputFormatField.addEventListener('change', handleStringSettingChange(OUTPUT_FORMAT_KEY))
+outputFormatField.value = getOutputFormat()
+
 diskPathField.addEventListener('change', handleStringSettingChange(DISK_PATH_KEY))
+widthField.addEventListener('change', resizeInpaintingEditor)
+heightField.addEventListener('change', resizeInpaintingEditor)
 
 saveToDiskField.addEventListener('click', function(e) {
     diskPathField.disabled = !this.checked
