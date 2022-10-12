@@ -1,3 +1,4 @@
+"use strict" // Opt in to a restricted variant of JavaScript
 const SOUND_ENABLED_KEY = "soundEnabled"
 const SAVE_TO_DISK_KEY = "saveToDisk"
 const USE_CPU_KEY = "useCPU"
@@ -230,14 +231,16 @@ function setStatus(statusType, msg, msgType) {
 }
 
 function logMsg(msg, level, outputMsg) {
-    if (level === 'error') {
-        outputMsg.innerHTML = '<span style="color: red">Error: ' + msg + '</span>'
-    } else if (level === 'warn') {
-        outputMsg.innerHTML = '<span style="color: orange">Warning: ' + msg + '</span>'
-    } else {
-        outputMsg.innerText = msg
+    if (outputMsg.hasChildNodes()) {
+        outputMsg.appendChild(document.createElement('br'))
     }
-
+    if (level === 'error') {
+        outputMsg.innerHTML += '<span style="color: red">Error: ' + msg + '</span>'
+    } else if (level === 'warn') {
+        outputMsg.innerHTML += '<span style="color: orange">Warning: ' + msg + '</span>'
+    } else {
+        outputMsg.innerText += msg
+    }
     console.log(level, msg)
 }
 
@@ -418,17 +421,24 @@ function getStartNewTaskHandler(reqBody, imageItemElem, mode) {
         switch (mode) {
             case 'img2img':
             case 'img2img_X2':
-                newTaskRequest.reqBody = Object.assign({}, reqBody, {
-                    num_outputs: 1,
-                    init_image: imageElem.src,
-                    sampler: 'ddim',
-                    prompt_strength: '0.5',
-                })
-                newTaskRequest.reqBody.num_inference_steps = Math.min(100, reqBody.num_inference_steps * 2)
+                newTaskRequest.reqBody = Object.assign({}, reqBody, { num_outputs: 1 })
+                if (!newTaskRequest.reqBody.init_image || mode === 'img2img_X2') {
+                    newTaskRequest.reqBody.sampler = 'ddim'
+                    newTaskRequest.reqBody.prompt_strength = '0.5'
+                    newTaskRequest.reqBody.init_image = imageElem.src
+                    delete newTaskRequest.reqBody.mask
+                } else {
+                    newTaskRequest.reqBody.seed = 1 + newTaskRequest.reqBody.seed
+                }
                 if (mode === 'img2img_X2') {
                     newTaskRequest.reqBody.width = reqBody.width * 2
                     newTaskRequest.reqBody.height = reqBody.height * 2
-                    
+                    newTaskRequest.reqBody.num_inference_steps = Math.min(100, reqBody.num_inference_steps * 2)
+                    if (useUpscalingField.checked) {
+                        newTaskRequest.reqBody.use_upscale = upscaleModelField.value
+                    } else {
+                        delete newTaskRequest.reqBody.use_upscale
+                    }
                 }
                 break
             case 'upscale':
@@ -472,7 +482,8 @@ async function doMakeImage(task) {
     const previewPrompt = task['previewPrompt']
     const progressBar = task['progressBar']
 
-    let res = ''
+    let res = undefined
+    let stepUpdate = undefined
     try {
         res = await fetch('/image', {
             method: 'POST',
@@ -486,41 +497,76 @@ async function doMakeImage(task) {
         let textDecoder = new TextDecoder()
         let finalJSON = ''
         let prevTime = -1
+        let readComplete = false
         while (true) {
-            try {
                 let t = new Date().getTime()
 
+            let jsonStr = ''
+            if (!readComplete) {
                 const {value, done} = await reader.read()
                 if (done) {
+                    readComplete = true
+                }
+                if (done && finalJSON.length <= 0 && !value) {
                     break
                 }
-
-                let timeTaken = (prevTime === -1 ? -1 : t - prevTime)
-
-                let jsonStr = textDecoder.decode(value)
-
+                if (value) {
+                    jsonStr = textDecoder.decode(value)
+                }
+            }
                 try {
-                    let stepUpdate = JSON.parse(jsonStr)
-
-                    if (stepUpdate.step === undefined) {
+                // hack for a middleman buffering all the streaming updates, and unleashing them on the poor browser in one shot.
+                // this results in having to parse JSON like {"step": 1}{"step": 2}{"step": 3}{"ste...
+                // which is obviously invalid and can happen at any point while rendering.
+                // So we need to extract only the next {} section
+                if (finalJSON.length > 0) {
+                    // Append new data when required
+                    if (jsonStr.length > 0) {
+                        jsonStr = finalJSON + jsonStr
+                    } else {
+                        jsonStr = finalJSON
+                    }
+                    finalJSON = ''
+                }
+                // Find next delimiter
+                let lastChunkIdx = jsonStr.indexOf('}{')
+                if (lastChunkIdx !== -1) {
+                    finalJSON = jsonStr.substring(0, lastChunkIdx + 1)
+                    jsonStr = jsonStr.substring(lastChunkIdx + 1)
+                } else {
+                    finalJSON = jsonStr
+                    jsonStr = ''
+                }
+                // Try to parse
+                stepUpdate = (finalJSON.length > 0 ? JSON.parse(finalJSON) : undefined)
+                finalJSON = jsonStr
+            } catch (e) {
+                if (e instanceof SyntaxError && !readComplete) {
                         finalJSON += jsonStr
                     } else {
+                    throw e
+                }
+            }
+            if (readComplete && finalJSON.length <= 0) {
+                break
+            }
+            if (typeof stepUpdate === 'object' && 'step' in stepUpdate) {
                         let batchSize = stepUpdate.total_steps
                         let overallStepCount = stepUpdate.step + task.batchesDone * batchSize
                         let totalSteps = batchCount * batchSize
                         let percent = 100 * (overallStepCount / totalSteps)
                         percent = (percent > 100 ? 100 : percent)
                         percent = percent.toFixed(0)
+                let timeTaken = (prevTime === -1 ? -1 : t - prevTime)
 
-                        stepsRemaining = totalSteps - overallStepCount
+                let stepsRemaining = totalSteps - overallStepCount
                         stepsRemaining = (stepsRemaining < 0 ? 0 : stepsRemaining)
-                        timeRemaining = (timeTaken === -1 ? '' : stepsRemaining * timeTaken) // ms
+                let timeRemaining = (timeTaken === -1 ? '' : stepsRemaining * timeTaken) // ms
 
                         outputMsg.innerHTML = `Batch ${task.batchesDone+1} of ${batchCount}`
                         outputMsg.innerHTML += `. Generating image(s): ${percent}%`
 
                         timeRemaining = (timeTaken !== -1 ? millisecondsToStr(timeRemaining) : '')
-
                         outputMsg.innerHTML += `. Time remaining (approx): ${timeRemaining}`
                         outputMsg.style.display = 'block'
 
@@ -528,48 +574,13 @@ async function doMakeImage(task) {
                             showImages(reqBody, stepUpdate, outputContainer, true)
                         }
                     }
-                } catch (e) {
-                    finalJSON += jsonStr
-                }
-
                 prevTime = t
-            } catch (e) {
-                logError('Stable Diffusion had an error. Please check the logs in the command-line window.', res, outputMsg)
-                res = undefined
-                throw e
-            }
         }
 
-        if (res.status != 200) {
-            if (serverStatus === 'online') {
-                logError('Stable Diffusion had an error: ' + await res.text(), res, outputMsg)
-            } else {
-                logError("Stable Diffusion is still starting up, please wait. If this goes on beyond a few minutes, Stable Diffusion has probably crashed. Please check the error message in the command-line window.", res, outputMsg)
-            }
-            res = undefined
-            progressBar.style.display = 'none'
-        } else {
-            if (finalJSON !== undefined && finalJSON.indexOf('}{') !== -1) {
-                // hack for a middleman buffering all the streaming updates, and unleashing them
-                //  on the poor browser in one shot.
-                //  this results in having to parse JSON like {"step": 1}{"step": 2}...{"status": "succeeded"..}
-                //  which is obviously invalid.
-                // So we need to just extract the last {} section, starting from "status" to the end of the response
-
-                let lastChunkIdx = finalJSON.lastIndexOf('}{')
-                if (lastChunkIdx !== -1) {
-                    let remaining = finalJSON.substring(lastChunkIdx)
-                    finalJSON = remaining.substring(1)
-                }
-            }
-
-            res = JSON.parse(finalJSON)
-
-            if (res.status !== 'succeeded') {
+        if (typeof stepUpdate === 'object' && stepUpdate.status !== 'succeeded') {
                 let msg = ''
-                if (res.detail !== undefined) {
-                    msg = res.detail
-
+            if ('detail' in stepUpdate && typeof stepUpdate.detail === 'string' && stepUpdate.detail.length > 0) {
+                msg = stepUpdate.detail
                     if (msg.toLowerCase().includes('out of memory')) {
                         msg += `<br/><br/>
                                 <b>Suggestions</b>:
@@ -579,26 +590,41 @@ async function doMakeImage(task) {
                                 3. Try generating a smaller image.<br/>`
                     }
                 } else {
-                    msg = res
+                msg = `Unexpected Read Error:<br/><pre>StepUpdate:${JSON.stringify(stepUpdate, undefined, 4)}</pre>`
                 }
                 logError(msg, res, outputMsg)
-                res = undefined
+            return false
             }
+        if (typeof stepUpdate !== 'object' || !res || res.status != 200) {
+            if (serverStatus !== 'online') {
+                logError("Stable Diffusion is still starting up, please wait. If this goes on beyond a few minutes, Stable Diffusion has probably crashed. Please check the error message in the command-line window.", res, outputMsg)
+            } else if (typeof res === 'object') {
+                let msg = 'Stable Diffusion had an error reading the response: '
+                try { // 'Response': body stream already read
+                    msg += 'Read: ' + await res.text()
+                } catch(e) {
+                    msg += 'No error response. '
         }
+                if (finalJSON) {
+                    msg += 'Buffered data: ' + finalJSON
+                }
+                logError(msg, res, outputMsg)
+            } else {
+                msg = `Unexpected Read Error:<br/><pre>Response:${res}<br/>StepUpdate:${typeof stepUpdate === 'object' ? JSON.stringify(stepUpdate, undefined, 4) : stepUpdate}</pre>`
+            }
+            progressBar.style.display = 'none'
+            return false
+        }
+
+        lastPromptUsed = reqBody['prompt']
+        showImages(reqBody, stepUpdate, outputContainer, false)
     } catch (e) {
         console.log('request error', e)
         logError('Stable Diffusion had an error. Please check the logs in the command-line window. <br/><br/>' + e + '<br/><pre>' + e.stack + '</pre>', res, outputMsg)
         setStatus('request', 'error', 'error')
         progressBar.style.display = 'none'
-        res = undefined
+        return false
     }
-
-    if (!res) return false
-
-    lastPromptUsed = reqBody['prompt']
-
-    showImages(reqBody, res, outputContainer, false)
-
     return true
 }
 
@@ -644,23 +670,24 @@ async function checkTasks() {
     const genSeeds = Boolean(typeof task.reqBody.seed !== 'number' || (task.reqBody.seed === task.seed && task.numOutputsTotal > 1))
     const startSeed = task.reqBody.seed || task.seed
     for (let i = 0; i < task.batchCount; i++) {
+        let newTask = task;
         if (task.batchCount > 1) {
             // Each output render batch needs it's own task instance to avoid altering the other runs after they are completed.
-            task = Object.assign({}, task, {
+            newTask = Object.assign({}, task, {
                 reqBody: Object.assign({}, task.reqBody)
             })
         }
         if (genSeeds) {
-            task.reqBody.seed = startSeed + (i * task.reqBody.num_outputs)
-            task.seed = task.reqBody.seed
-        } else if (task.seed !== task.reqBody.seed) {
-            task.seed = task.reqBody.seed
+            newTask.reqBody.seed = startSeed + (i * newTask.reqBody.num_outputs)
+            newTask.seed = newTask.reqBody.seed
+        } else if (newTask.seed !== newTask.reqBody.seed) {
+            newTask.seed = newTask.reqBody.seed
         }
 
-        let success = await doMakeImage(task)
+        let success = await doMakeImage(newTask)
         task.batchesDone++
 
-        if (!task.isProcessing) {
+        if (!task.isProcessing || !success) {
             break
         }
 
@@ -678,7 +705,6 @@ async function checkTasks() {
 
     if (successCount === task.batchCount) {
         task.outputMsg.innerText = 'Processed ' + task.numOutputsTotal + ' images in ' + time + ' seconds'
-
         // setStatus('request', 'done', 'success')
     } else {
         if (task.outputMsg.innerText.toLowerCase().indexOf('error') === -1) {
@@ -692,9 +718,17 @@ async function checkTasks() {
 
     currentTask = null
 
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(checkTasks, { timeout: 30 * 1000 })
+    } else {
+        setTimeout(checkTasks, 500)
+    }
+}
+if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(checkTasks, { timeout: 30 * 1000 })
+} else {
     setTimeout(checkTasks, 10)
 }
-setTimeout(checkTasks, 0)
 
 function getCurrentUserRequest() {
     const numOutputsTotal = parseInt(numOutputsTotalField.value)
@@ -1097,7 +1131,7 @@ useBetaChannelField.addEventListener('click', async function(e) {
 async function getAppConfig() {
     try {
         let res = await fetch('/app_config')
-        config = await res.json()
+        const config = await res.json()
 
         if (config.update_branch === 'beta') {
             useBetaChannelField.checked = true
@@ -1113,7 +1147,7 @@ async function getAppConfig() {
 async function getModels() {
     try {
         let res = await fetch('/models')
-        models = await res.json()
+        const models = await res.json()
 
         let activeModel = models['active']
         let modelOptions = models['options']
@@ -1131,7 +1165,7 @@ async function getModels() {
             stableDiffusionModelField.appendChild(modelOption)
         })
 
-        console.log('get models response', config)
+        console.log('get models response', models)
     } catch (e) {
         console.log('get models error', e)
     }
