@@ -419,7 +419,7 @@ img {
 }
 .filterLabel {
     display: inline-block;
-    font-size: 9pt;
+    font-size: 10pt;
     background:rgb(63, 83, 143);
     border: 1px solid rgb(255, 255, 255);
     padding: 2pt 4pt;
