@@ -454,6 +454,7 @@ function getStartNewTaskHandler(reqBody, imageItemElem, mode) {
                     use_face_correction: 'GFPGANv1.3',
                     //use_upscale: upscaleModelField.value,
                 })
+                
                 break
             default:
                 throw new Error("Unknown upscale mode: " + mode)
@@ -805,6 +806,9 @@ function makeImage() {
 }
 
 function createTask(task) {
+    let faceIcon = `<label class="filterLabel"><i class="fa-solid fa-eye"></i> Face Fixed</label>`
+    let upscaleIcon = `<label class="filterLabel"><i class="fa-solid fa-arrows-up-to-line"></i> Upscaled</label>`
+    let filterIcons = ''
     let taskConfig = `Seed: ${task.seed}, Sampler: ${task.reqBody.sampler}, Inference Steps: ${task.reqBody.num_inference_steps}, Guidance Scale: ${task.reqBody.guidance_scale}, Model: ${task.reqBody.use_stable_diffusion_model}`
     if (negativePromptField.value.trim() !== '') {
         taskConfig += `, Negative Prompt: ${task.reqBody.negative_prompt}`
@@ -814,9 +818,11 @@ function createTask(task) {
     }
     if (task.reqBody.use_face_correction) {
         taskConfig += `, Fix Faces: ${task.reqBody.use_face_correction}`
+        filterIcons += faceIcon
     }
     if (task.reqBody.use_upscale) {
         taskConfig += `, Upscale: ${task.reqBody.use_upscale}`
+        filterIcons += upscaleIcon
     }
 
     let taskEntry = document.createElement('div')
@@ -824,6 +830,7 @@ function createTask(task) {
     taskEntry.innerHTML = ` <div class="taskStatusLabel">Enqueued</div>
                             <button class="secondaryButton stopTask"><i class="fa-solid fa-trash-can"></i> Remove</button>
                             <div class="preview-prompt collapsible active"></div>
+                            <div class="filters">${filterIcons}</div>
                             <div class="taskConfig">${taskConfig}</div>
                             <div class="collapsible-content" style="display: block">
                                 <div class="outputMsg"></div>

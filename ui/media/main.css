@@ -417,3 +417,13 @@ img {
 #prompt_from_file {
     display: none;
 }
+.filterLabel {
+    display: inline-block;
+    font-size: 9pt;
+    background:rgb(63, 83, 143);
+    border: 1px solid rgb(255, 255, 255);
+    padding: 2pt 4pt;
+    border-radius: 2pt;
+    margin-right: 5pt;
+    margin-bottom: 5pt;
+}
