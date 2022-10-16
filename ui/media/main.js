@@ -358,9 +358,11 @@ function showImages(reqBody, res, outputContainer, livePreview) {
             if (!req.use_upscale) {
                 buttons.upscaleBtn = { html: 'Upscale', click: getStartNewTaskHandler(req, imageItemElem, 'upscale') }
             }
+
             if (!req.use_face_correction) {
                 buttons.faceBtn = { html: 'Fix Face', click: getStartNewTaskHandler(req, imageItemElem, 'face') }
             }
+
             const imgItemInfo = imageItemElem.querySelector('.imgItemInfo')
             const createButton = function(name, btnInfo) {
                 const newButton = document.createElement('button')
@@ -448,6 +450,7 @@ function getStartNewTaskHandler(reqBody, imageItemElem, mode) {
                     use_upscale: upscaleModelField.value,
                 })
                 break
+
             case 'face':
                 newTaskRequest.reqBody = Object.assign({}, reqBody, {
                     num_outputs: 1,
@@ -456,6 +459,7 @@ function getStartNewTaskHandler(reqBody, imageItemElem, mode) {
                 })
                 
                 break
+
             default:
                 throw new Error("Unknown upscale mode: " + mode)
         }
@@ -500,7 +504,9 @@ async function doMakeImage(task) {
         let prevTime = -1
         let readComplete = false
         while (true) {
-                let t = new Date().getTime()
+
+            let t = new Date().getTime()
+
 
             let jsonStr = ''
             if (!readComplete) {
@@ -515,7 +521,9 @@ async function doMakeImage(task) {
                     jsonStr = textDecoder.decode(value)
                 }
             }
-                try {
+
+            try {
+
                 // hack for a middleman buffering all the streaming updates, and unleashing them on the poor browser in one shot.
                 // this results in having to parse JSON like {"step": 1}{"step": 2}{"step": 3}{"ste...
                 // which is obviously invalid and can happen at any point while rendering.
@@ -524,6 +532,7 @@ async function doMakeImage(task) {
                     // Append new data when required
                     if (jsonStr.length > 0) {
                         jsonStr = finalJSON + jsonStr
+
                     } else {
                         jsonStr = finalJSON
                     }
@@ -543,8 +552,9 @@ async function doMakeImage(task) {
                 finalJSON = jsonStr
             } catch (e) {
                 if (e instanceof SyntaxError && !readComplete) {
-                        finalJSON += jsonStr
-                    } else {
+                    finalJSON += jsonStr
+                } else {
+
                     throw e
                 }
             }
@@ -552,50 +562,53 @@ async function doMakeImage(task) {
                 break
             }
             if (typeof stepUpdate === 'object' && 'step' in stepUpdate) {
-                        let batchSize = stepUpdate.total_steps
-                        let overallStepCount = stepUpdate.step + task.batchesDone * batchSize
-                        let totalSteps = batchCount * batchSize
-                        let percent = 100 * (overallStepCount / totalSteps)
-                        percent = (percent > 100 ? 100 : percent)
-                        percent = percent.toFixed(0)
+
+                let batchSize = stepUpdate.total_steps
+                let overallStepCount = stepUpdate.step + task.batchesDone * batchSize
+                let totalSteps = batchCount * batchSize
+                let percent = 100 * (overallStepCount / totalSteps)
+                percent = (percent > 100 ? 100 : percent)
+                percent = percent.toFixed(0)
                 let timeTaken = (prevTime === -1 ? -1 : t - prevTime)
 
+
                 let stepsRemaining = totalSteps - overallStepCount
-                        stepsRemaining = (stepsRemaining < 0 ? 0 : stepsRemaining)
+                stepsRemaining = (stepsRemaining < 0 ? 0 : stepsRemaining)
                 let timeRemaining = (timeTaken === -1 ? '' : stepsRemaining * timeTaken) // ms
 
-                        outputMsg.innerHTML = `Batch ${task.batchesDone+1} of ${batchCount}`
-                        outputMsg.innerHTML += `. Generating image(s): ${percent}%`
 
-                        timeRemaining = (timeTaken !== -1 ? millisecondsToStr(timeRemaining) : '')
-                        outputMsg.innerHTML += `. Time remaining (approx): ${timeRemaining}`
-                        outputMsg.style.display = 'block'
+                outputMsg.innerHTML = `Batch ${task.batchesDone+1} of ${batchCount}`
+                outputMsg.innerHTML += `. Generating image(s): ${percent}%`
 
-                        if (stepUpdate.output !== undefined) {
-                            showImages(reqBody, stepUpdate, outputContainer, true)
-                        }
-                    }
-                prevTime = t
+                timeRemaining = (timeTaken !== -1 ? millisecondsToStr(timeRemaining) : '')
+                outputMsg.innerHTML += `. Time remaining (approx): ${timeRemaining}`
+                outputMsg.style.display = 'block'
+
+                if (stepUpdate.output !== undefined) {
+                    showImages(reqBody, stepUpdate, outputContainer, true)
+                }
+            }
+            prevTime = t
         }
 
         if (typeof stepUpdate === 'object' && stepUpdate.status !== 'succeeded') {
-                let msg = ''
+            let msg = ''
             if ('detail' in stepUpdate && typeof stepUpdate.detail === 'string' && stepUpdate.detail.length > 0) {
                 msg = stepUpdate.detail
-                    if (msg.toLowerCase().includes('out of memory')) {
-                        msg += `<br/><br/>
-                                <b>Suggestions</b>:
-                                <br/>
-                                1. If you have set an initial image, please try reducing its dimension to ${MAX_INIT_IMAGE_DIMENSION}x${MAX_INIT_IMAGE_DIMENSION} or smaller.<br/>
-                                2. Try disabling the '<em>Turbo mode</em>' under '<em>Advanced Settings</em>'.<br/>
-                                3. Try generating a smaller image.<br/>`
-                    }
-                } else {
-                msg = `Unexpected Read Error:<br/><pre>StepUpdate:${JSON.stringify(stepUpdate, undefined, 4)}</pre>`
+                if (msg.toLowerCase().includes('out of memory')) {
+                    msg += `<br/><br/>
+                            <b>Suggestions</b>:
+                            <br/>
+                            1. If you have set an initial image, please try reducing its dimension to ${MAX_INIT_IMAGE_DIMENSION}x${MAX_INIT_IMAGE_DIMENSION} or smaller.<br/>
+                            2. Try disabling the '<em>Turbo mode</em>' under '<em>Advanced Settings</em>'.<br/>
+                            3. Try generating a smaller image.<br/>`
                 }
-                logError(msg, res, outputMsg)
-            return false
+            } else {
+                msg = `Unexpected Read Error:<br/><pre>StepUpdate:${JSON.stringify(stepUpdate, undefined, 4)}</pre>`
             }
+            logError(msg, res, outputMsg)
+            return false
+        }
         if (typeof stepUpdate !== 'object' || !res || res.status != 200) {
             if (serverStatus !== 'online') {
                 logError("Stable Diffusion is still starting up, please wait. If this goes on beyond a few minutes, Stable Diffusion has probably crashed. Please check the error message in the command-line window.", res, outputMsg)
@@ -605,7 +618,7 @@ async function doMakeImage(task) {
                     msg += 'Read: ' + await res.text()
                 } catch(e) {
                     msg += 'No error response. '
-        }
+                }
                 if (finalJSON) {
                     msg += 'Buffered data: ' + finalJSON
                 }
@@ -616,6 +629,7 @@ async function doMakeImage(task) {
             progressBar.style.display = 'none'
             return false
         }
+
 
         lastPromptUsed = reqBody['prompt']
         showImages(reqBody, stepUpdate, outputContainer, false)
@@ -786,6 +800,7 @@ function getCurrentUserRequest() {
     }
     if (useUpscalingField.checked) {
         newTask.reqBody.use_upscale = upscaleModelField.value
+
     }
     return newTask
 }
@@ -802,13 +817,16 @@ function makeImage() {
     })))
     newTaskRequests.forEach(createTask)
 
+
     initialText.style.display = 'none'
 }
 
 function createTask(task) {
+
     let faceIcon = `<label class="filterLabel"><i class="fa-solid fa-eye"></i> Face Fixed</label>`
     let upscaleIcon = `<label class="filterLabel"><i class="fa-solid fa-arrows-up-to-line"></i> Upscaled</label>`
     let filterIcons = ''
+
     let taskConfig = `Seed: ${task.seed}, Sampler: ${task.reqBody.sampler}, Inference Steps: ${task.reqBody.num_inference_steps}, Guidance Scale: ${task.reqBody.guidance_scale}, Model: ${task.reqBody.use_stable_diffusion_model}`
     if (negativePromptField.value.trim() !== '') {
         taskConfig += `, Negative Prompt: ${task.reqBody.negative_prompt}`
@@ -818,11 +836,13 @@ function createTask(task) {
     }
     if (task.reqBody.use_face_correction) {
         taskConfig += `, Fix Faces: ${task.reqBody.use_face_correction}`
+
         filterIcons += faceIcon
     }
     if (task.reqBody.use_upscale) {
         taskConfig += `, Upscale: ${task.reqBody.use_upscale}`
         filterIcons += upscaleIcon
+
     }
 
     let taskEntry = document.createElement('div')
