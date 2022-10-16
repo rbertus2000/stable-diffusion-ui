@@ -358,6 +358,11 @@ function showImages(reqBody, res, outputContainer, livePreview) {
             if (!req.use_upscale) {
                 buttons.upscaleBtn = { html: 'Upscale', click: getStartNewTaskHandler(req, imageItemElem, 'upscale') }
             }
+
+            if (!req.use_face_correction) {
+                buttons.faceBtn = { html: 'Fix Face', click: getStartNewTaskHandler(req, imageItemElem, 'face') }
+            }
+
             const imgItemInfo = imageItemElem.querySelector('.imgItemInfo')
             const createButton = function(name, btnInfo) {
                 const newButton = document.createElement('button')
@@ -445,6 +450,16 @@ function getStartNewTaskHandler(reqBody, imageItemElem, mode) {
                     use_upscale: upscaleModelField.value,
                 })
                 break
+
+            case 'face':
+                newTaskRequest.reqBody = Object.assign({}, reqBody, {
+                    num_outputs: 1,
+                    use_face_correction: 'GFPGANv1.3',
+                    //use_upscale: upscaleModelField.value,
+                })
+                
+                break
+
             default:
                 throw new Error("Unknown upscale mode: " + mode)
         }
@@ -489,7 +504,9 @@ async function doMakeImage(task) {
         let prevTime = -1
         let readComplete = false
         while (true) {
+
             let t = new Date().getTime()
+
 
             let jsonStr = ''
             if (!readComplete) {
@@ -504,7 +521,9 @@ async function doMakeImage(task) {
                     jsonStr = textDecoder.decode(value)
                 }
             }
+
             try {
+
                 // hack for a middleman buffering all the streaming updates, and unleashing them on the poor browser in one shot.
                 // this results in having to parse JSON like {"step": 1}{"step": 2}{"step": 3}{"ste...
                 // which is obviously invalid and can happen at any point while rendering.
@@ -513,6 +532,7 @@ async function doMakeImage(task) {
                     // Append new data when required
                     if (jsonStr.length > 0) {
                         jsonStr = finalJSON + jsonStr
+
                     } else {
                         jsonStr = finalJSON
                     }
@@ -534,6 +554,7 @@ async function doMakeImage(task) {
                 if (e instanceof SyntaxError && !readComplete) {
                     finalJSON += jsonStr
                 } else {
+
                     throw e
                 }
             }
@@ -541,6 +562,7 @@ async function doMakeImage(task) {
                 break
             }
             if (typeof stepUpdate === 'object' && 'step' in stepUpdate) {
+
                 let batchSize = stepUpdate.total_steps
                 let overallStepCount = stepUpdate.step + task.batchesDone * batchSize
                 let totalSteps = batchCount * batchSize
@@ -549,9 +571,11 @@ async function doMakeImage(task) {
                 percent = percent.toFixed(0)
                 let timeTaken = (prevTime === -1 ? -1 : t - prevTime)
 
+
                 let stepsRemaining = totalSteps - overallStepCount
                 stepsRemaining = (stepsRemaining < 0 ? 0 : stepsRemaining)
                 let timeRemaining = (timeTaken === -1 ? '' : stepsRemaining * timeTaken) // ms
+
 
                 outputMsg.innerHTML = `Batch ${task.batchesDone+1} of ${batchCount}`
                 outputMsg.innerHTML += `. Generating image(s): ${percent}%`
@@ -605,6 +629,7 @@ async function doMakeImage(task) {
             progressBar.style.display = 'none'
             return false
         }
+
 
         lastPromptUsed = reqBody['prompt']
         showImages(reqBody, stepUpdate, outputContainer, false)
@@ -775,6 +800,7 @@ function getCurrentUserRequest() {
     }
     if (useUpscalingField.checked) {
         newTask.reqBody.use_upscale = upscaleModelField.value
+
     }
     return newTask
 }
@@ -791,10 +817,16 @@ function makeImage() {
     })))
     newTaskRequests.forEach(createTask)
 
+
     initialText.style.display = 'none'
 }
 
 function createTask(task) {
+
+    let faceIcon = `<label class="filterLabel"><i class="fa-solid fa-eye"></i> Face Fixed</label>`
+    let upscaleIcon = `<label class="filterLabel"><i class="fa-solid fa-arrows-up-to-line"></i> Upscaled</label>`
+    let filterIcons = ''
+
     let taskConfig = `Seed: ${task.seed}, Sampler: ${task.reqBody.sampler}, Inference Steps: ${task.reqBody.num_inference_steps}, Guidance Scale: ${task.reqBody.guidance_scale}, Model: ${task.reqBody.use_stable_diffusion_model}`
     if (negativePromptField.value.trim() !== '') {
         taskConfig += `, Negative Prompt: ${task.reqBody.negative_prompt}`
@@ -804,9 +836,13 @@ function createTask(task) {
     }
     if (task.reqBody.use_face_correction) {
         taskConfig += `, Fix Faces: ${task.reqBody.use_face_correction}`
+
+        filterIcons += faceIcon
     }
     if (task.reqBody.use_upscale) {
         taskConfig += `, Upscale: ${task.reqBody.use_upscale}`
+        filterIcons += upscaleIcon
+
     }
 
     let taskEntry = document.createElement('div')
@@ -814,6 +850,7 @@ function createTask(task) {
     taskEntry.innerHTML = ` <div class="taskStatusLabel">Enqueued</div>
                             <button class="secondaryButton stopTask"><i class="fa-solid fa-trash-can"></i> Remove</button>
                             <div class="preview-prompt collapsible active"></div>
+                            <div class="filters">${filterIcons}</div>
                             <div class="taskConfig">${taskConfig}</div>
                             <div class="collapsible-content" style="display: block">
                                 <div class="outputMsg"></div>
