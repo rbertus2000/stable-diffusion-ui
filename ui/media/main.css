@@ -514,6 +514,7 @@ img {
 #prompt_from_file {
     display: none;
 }
+
 #init_image_preview {
     max-width: 150px;
     max-height: 150px;
@@ -726,4 +727,15 @@ input[type="range"]::-moz-range-thumb {
 
 #promptsFromFileBtn {
     font-size: 9pt;
+
+.filterLabel {
+    display: inline-block;
+    font-size: 10pt;
+    background:rgb(63, 83, 143);
+    border: 1px solid rgb(255, 255, 255);
+    padding: 2pt 4pt;
+    border-radius: 2pt;
+    margin-right: 5pt;
+    margin-bottom: 5pt;
+
 }

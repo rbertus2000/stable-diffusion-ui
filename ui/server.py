@@ -37,6 +37,7 @@ ACCESS_LOG_SUPPRESS_PATH_PREFIXES = ['/ping', '/image', '/modifier-thumbnails']
 NOCACHE_HEADERS={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
 app.mount('/media', StaticFiles(directory=os.path.join(SD_UI_DIR, 'media/')), name="media")
 
+
 class SetAppConfigRequest(BaseModel):
     update_branch: str = "main"
 
@@ -275,6 +276,7 @@ class LogSuppressFilter(logging.Filter):
             if path.find(prefix) != -1:
                 return False
         return True
+
 logging.getLogger('uvicorn.access').addFilter(LogSuppressFilter())
 
 task_manager.default_model_to_load = get_initial_model_to_load()
@@ -282,3 +284,4 @@ task_manager.start_render_thread()
 
 # start the browser ui
 import webbrowser; webbrowser.open('http://localhost:9000')
+
